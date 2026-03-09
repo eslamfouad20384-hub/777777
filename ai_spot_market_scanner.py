@@ -10,7 +10,7 @@ st.set_page_config(layout="wide")
 # ==============================
 MIN_MARKET_CAP = 50_000_000
 MIN_VOLUME = 5_000_000
-TOP_LIMIT = 300
+TOP_LIMIT = 10
 FIB_PERIOD = 50
 MIN_SCORE = 60
 
@@ -67,7 +67,6 @@ def calculate_score(df, smart_mode=False):
         score += 20
     if latest["ema50"] > latest["ema200"]:
         score += 20
-    # حجم التداول
     if "volumeto" not in df.columns:
         df["volumeto"] = df.get("volumefrom", 0) * df["close"]
     avg_vol = df["volumeto"].rolling(20).mean().iloc[-1]
@@ -82,13 +81,11 @@ def calculate_score(df, smart_mode=False):
 # ==============================
 def find_targets(df):
     latest_price = df.iloc[-1]["close"]
-
     df["swing_low"] = df["low"][
         (df["low"].shift(1) > df["low"]) & (df["low"].shift(-1) > df["low"])
     ]
     swing_lows = df["swing_low"].dropna()
     valid_supports = swing_lows[swing_lows < latest_price].sort_values(ascending=False)
-
     if len(valid_supports) >= 2:
         support1 = valid_supports.iloc[0]
         support2 = valid_supports.iloc[1]
@@ -98,36 +95,27 @@ def find_targets(df):
     else:
         support1 = df["low"].rolling(FIB_PERIOD).min().iloc[-1]
         support2 = support1 * 0.97
-
     period_high = df["high"].rolling(FIB_PERIOD).max().iloc[-1]
     period_low  = df["low"].rolling(FIB_PERIOD).min().iloc[-1]
-
-    target1 = max(latest_price, period_low + (period_high - period_low) * 0.618)  # 61.8%
-    target2 = max(latest_price, period_low + (period_high - period_low) * 1.0)    # 100%
-    target3 = max(latest_price, period_low + (period_high - period_low) * 1.5)    # 150%
-
+    target1 = max(latest_price, period_low + (period_high - period_low) * 0.618)
+    target2 = max(latest_price, period_low + (period_high - period_low) * 1.0)
+    target3 = max(latest_price, period_low + (period_high - period_low) * 1.5)
     return target1, target2, target3, support1, support2
 
 # ==============================
-# دعم ومقاومة 30 و50
+# دعم ومقاومة
 # ==============================
 def calculate_support_resistance(df):
     if len(df) < 50:
         return None
-
     current_price = df["close"].iloc[-1]
-
     support_30 = df["low"].rolling(30).min().iloc[-1]
     resistance_30 = df["high"].rolling(30).max().iloc[-1]
-
     support_50 = df["low"].rolling(50).min().iloc[-1]
     resistance_50 = df["high"].rolling(50).max().iloc[-1]
-
     def proximity(price, level):
         return abs(price - level) / level
-
     location = "منطقة محايدة"
-
     if proximity(current_price, support_50) < 0.03:
         location = "قريب من دعم قوي (50 يوم)"
     elif proximity(current_price, support_30) < 0.03:
@@ -136,7 +124,6 @@ def calculate_support_resistance(df):
         location = "قريب من مقاومة قوية (50 يوم)"
     elif proximity(current_price, resistance_30) < 0.03:
         location = "قريب من مقاومة (30 يوم)"
-
     return support_30, support_50, resistance_30, resistance_50, location
 
 # ==============================
@@ -168,9 +155,6 @@ if st.button("🔍 Scan Market"):
         if ohlc is None or len(ohlc) < 100:
             st.write(f"❌ {symbol} → فشل جلب بيانات OHLC")
             continue
-        else:
-            st.write(f"✅ {symbol} → بيانات OHLC جاهزة ({len(ohlc)} شمعة)")
-
         if "volumeto" not in ohlc.columns:
             ohlc["volumeto"] = ohlc.get("volumefrom", 0) * ohlc["close"]
 
@@ -182,17 +166,37 @@ if st.button("🔍 Scan Market"):
             continue
 
         target1, target2, target3, support1, support2 = find_targets(ohlc)
-        st.write(f"🎯 {symbol} → ناجح، Score = {score}")
+        support_30, support_50, resistance_30, resistance_50, location = calculate_support_resistance(ohlc)
+        latest = ohlc.iloc[-1]
+
+        # ==============================
+        # وصف المؤشرات والتلميحات
+        # ==============================
+        rsi_desc = "RSI منخفض → فرصة شراء محتملة" if latest["rsi"] < 50 else "RSI مرتفع → حذر من الشراء"
+        macd_desc = "MACD فوق Signal → اتجاه صاعد محتمل" if latest["macd"] > latest["signal"] else "MACD تحت Signal → احتمال هبوط"
+        ema_desc = "EMA50 فوق EMA200 → اتجاه صاعد" if latest["ema50"] > latest["ema200"] else "EMA50 تحت EMA200 → اتجاه هابط"
+        score_desc = "فرصة قوية" if score >= 80 else ("فرصة متوسطة" if score >= 60 else "فرصة ضعيفة")
+        location_hint = "السعر قريب من دعم → فرصة شراء أفضل" if "دعم" in location else ("السعر قريب من مقاومة → احتمال تصحيح" if "مقاومة" in location else "السعر في منطقة محايدة")
 
         results.append({
             "symbol": symbol,
-            "price": ohlc.iloc[-1]["close"],
+            "price": latest["close"],
             "score": score,
+            "score_desc": score_desc,
             "target1": target1,
             "target2": target2,
             "target3": target3,
             "support1": support1,
-            "support2": support2
+            "support2": support2,
+            "support_30": support_30,
+            "support_50": support_50,
+            "resistance_30": resistance_30,
+            "resistance_50": resistance_50,
+            "location": location,
+            "location_hint": location_hint,
+            "rsi_desc": rsi_desc,
+            "macd_desc": macd_desc,
+            "ema_desc": ema_desc
         })
 
         progress.progress(idx/total)
@@ -201,40 +205,20 @@ if st.button("🔍 Scan Market"):
         st.warning("لا توجد فرص حالياً")
     else:
         results_df = pd.DataFrame(results)
-        results_df = results_df.sort_values("score", ascending=False).head(10)
-        st.success("أفضل 10 فرص حالياً")
-        st.dataframe(results_df)
+        results_df = results_df.sort_values("score", ascending=False)
+        st.success(f"أفضل {len(results_df)} فرص حالياً")
 
-        # ==============================
-        # تحليل العملة المختارة مع session_state
-        # ==============================
-        if "ohlc_data" not in st.session_state:
-            st.session_state.ohlc_data = {}
-
-        selected = st.selectbox("اختر عملة للتحليل المفصل", results_df["symbol"])
-        if selected:
-            if selected not in st.session_state.ohlc_data:
-                try:
-                    ohlc = fetch_ohlc(selected)
-                    if ohlc is not None:
-                        ohlc = add_indicators(ohlc)
-                        st.session_state.ohlc_data[selected] = ohlc
-                    else:
-                        st.error(f"❌ فشل جلب بيانات {selected}")
-                except:
-                    st.error(f"❌ حدث خطأ أثناء تحميل بيانات {selected}")
-                    ohlc = None
-            else:
-                ohlc = st.session_state.ohlc_data[selected]
-
-            if ohlc is not None:
-                st.subheader(f"تحليل {selected}")
-                latest = ohlc.iloc[-1]
-                support_30, support_50, resistance_30, resistance_50, location = calculate_support_resistance(ohlc)
-
-                st.write(f"💰 سعر الدخول الحالي: {round(latest['close'],4)}")
-                st.write(f"🟢 دعم 30 يوم: {round(support_30,4)}")
-                st.write(f"🟢 دعم 50 يوم: {round(support_50,4)}")
-                st.write(f"🔴 مقاومة 30 يوم: {round(resistance_30,4)}")
-                st.write(f"🔴 مقاومة 50 يوم: {round(resistance_50,4)}")
-                st.write(f"📍 مكان السعر: {location}")
+        # عرض التحليل لكل عملة مع وصف وتلميحات
+        for idx, row in results_df.iterrows():
+            st.subheader(f"تحليل {row['symbol']}")
+            st.write(f"💰 سعر الدخول الحالي: {round(row['price'],4)}")
+            st.write(f"🎯 أهداف فيبوناتشي: {round(row['target1'],4)}, {round(row['target2'],4)}, {round(row['target3'],4)}")
+            st.write(f"🟢 دعوم: {round(row['support1'],4)}, {round(row['support2'],4)}")
+            st.write(f"🟢 دعم 30 يوم: {round(row['support_30'],4)}, دعم 50 يوم: {round(row['support_50'],4)}")
+            st.write(f"🔴 مقاومات: 30 يوم: {round(row['resistance_30'],4)}, 50 يوم: {round(row['resistance_50'],4)}")
+            st.write(f"📍 مكان السعر: {row['location']}")
+            st.write(f"💡 تلميح: {row['location_hint']}")
+            st.write(f"📊 RSI: {row['rsi_desc']}")
+            st.write(f"📊 MACD: {row['macd_desc']}")
+            st.write(f"📊 EMA: {row['ema_desc']}")
+            st.write(f"⭐ Score: {row['score']} → {row['score_desc']}")
