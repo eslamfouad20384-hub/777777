@@ -2,103 +2,104 @@ import streamlit as st
 import requests
 import pandas as pd
 from textblob import TextBlob
+from deep_translator import GoogleTranslator
 
 st.set_page_config(layout="wide")
 
 st.title("🧠 محلل أخبار البورصة والكريبتو")
-st.write("يجمع الأخبار ويحلل تأثيرها على السوق")
+st.write("يجمع الأخبار ويحلل تأثيرها على السوق بالعربي")
 
-# API KEY
 API_KEY = "003f560175ff433399210b1564343f34"
 
-# ==========================
+# ======================
 # جلب الأخبار
-# ==========================
+# ======================
 
 def get_news():
 
     url = f"https://newsapi.org/v2/everything?q=crypto OR bitcoin OR ethereum OR stock market OR egypt economy&language=en&sortBy=publishedAt&pageSize=30&apiKey={API_KEY}"
 
-    try:
-        r = requests.get(url)
-        data = r.json()
+    r = requests.get(url)
+    data = r.json()
 
-        if "articles" in data:
-            return data["articles"]
-        else:
-            st.error("مفيش أخبار جت من السيرفر")
-            st.write(data)
-            return []
-
-    except:
-        st.error("حصل خطأ في الاتصال")
+    if "articles" in data:
+        return data["articles"]
+    else:
+        st.write(data)
         return []
 
-# ==========================
+# ======================
+# ترجمة الخبر
+# ======================
+
+def translate(text):
+    try:
+        return GoogleTranslator(source='auto', target='ar').translate(text)
+    except:
+        return text
+
+# ======================
 # تحليل المشاعر
-# ==========================
+# ======================
 
-def analyze_sentiment(text):
+def analyze(text):
 
-    analysis = TextBlob(text)
-
-    score = analysis.sentiment.polarity
+    score = TextBlob(text).sentiment.polarity
 
     if score > 0.2:
-        return "📈 إيجابي"
+        return "📈 إيجابي", "فرصة شراء"
     elif score < -0.2:
-        return "📉 سلبي"
+        return "📉 سلبي", "حذر"
     else:
-        return "⚖️ محايد"
+        return "⚖️ محايد", "انتظار"
 
-# ==========================
+# ======================
 # تحديد الأصل
-# ==========================
+# ======================
 
 def detect_asset(text):
 
     text = text.lower()
 
     if "bitcoin" in text:
-        return "BTC"
+        return "بيتكوين"
     elif "ethereum" in text:
-        return "ETH"
+        return "إيثريوم"
     elif "solana" in text:
-        return "SOL"
+        return "سولانا"
     elif "crypto" in text:
-        return "سوق الكريبتو"
-    elif "stock" in text:
-        return "الأسهم"
+        return "سوق العملات الرقمية"
     elif "egypt" in text:
         return "البورصة المصرية"
     else:
-        return "عام"
+        return "السوق العام"
 
-# ==========================
+# ======================
 # تشغيل التحليل
-# ==========================
+# ======================
 
 if st.button("تحليل الأخبار الآن"):
 
     news = get_news()
 
-    if len(news) == 0:
-        st.stop()
-
     results = []
 
     for article in news:
 
-        title = article.get("title", "")
-        url = article.get("url", "")
+        title = article.get("title","")
+        url = article.get("url","")
 
-        sentiment = analyze_sentiment(title)
+        arabic_title = translate(title)
+
+        sentiment, decision = analyze(title)
+
         asset = detect_asset(title)
 
         results.append({
-            "الأصل المتأثر": asset,
-            "الخبر": title,
+            "الأصل": asset,
+            "الخبر": arabic_title,
             "التأثير": sentiment,
+            "التقييم": decision,
             "الرابط": url
         })
 
