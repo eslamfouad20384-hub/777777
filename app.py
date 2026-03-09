@@ -9,38 +9,55 @@ st.set_page_config(layout="wide")
 st.title("🧠 محلل أخبار البورصة والكريبتو")
 st.write("يجمع الأخبار ويحلل تأثيرها على السوق بالعربي")
 
-API_KEY = "003f560175ff433399210b1564343f34"
+# مفتاح الأخبار
+NEWS_API = "003f560175ff433399210b1564343f34"
 
-# ======================
-# جلب الأخبار
-# ======================
+# =========================
+# جلب الأخبار العامة
+# =========================
 
-def get_news():
+def get_general_news():
 
-    url = f"https://newsapi.org/v2/everything?q=crypto OR bitcoin OR ethereum OR stock market OR egypt economy&language=en&sortBy=publishedAt&pageSize=30&apiKey={API_KEY}"
+    url = f"https://newsapi.org/v2/everything?q=stock market OR egypt economy OR bitcoin OR crypto&language=en&sortBy=publishedAt&pageSize=20&apiKey={NEWS_API}"
 
     r = requests.get(url)
     data = r.json()
 
     if "articles" in data:
         return data["articles"]
-    else:
-        st.write(data)
+    return []
+
+# =========================
+# أخبار الكريبتو
+# =========================
+
+def get_crypto_news():
+
+    url = "https://cryptopanic.com/api/v1/posts/?auth_token=demo&public=true"
+
+    try:
+        r = requests.get(url)
+        data = r.json()
+
+        return data["results"][:20]
+
+    except:
         return []
 
-# ======================
-# ترجمة الخبر
-# ======================
+# =========================
+# ترجمة
+# =========================
 
 def translate(text):
+
     try:
         return GoogleTranslator(source='auto', target='ar').translate(text)
     except:
         return text
 
-# ======================
+# =========================
 # تحليل المشاعر
-# ======================
+# =========================
 
 def analyze(text):
 
@@ -53,9 +70,9 @@ def analyze(text):
     else:
         return "⚖️ محايد", "انتظار"
 
-# ======================
+# =========================
 # تحديد الأصل
-# ======================
+# =========================
 
 def detect_asset(text):
 
@@ -74,22 +91,23 @@ def detect_asset(text):
     else:
         return "السوق العام"
 
-# ======================
+# =========================
 # تشغيل التحليل
-# ======================
+# =========================
 
 if st.button("تحليل الأخبار الآن"):
 
-    news = get_news()
-
     results = []
+
+    # الأخبار العامة
+    news = get_general_news()
 
     for article in news:
 
         title = article.get("title","")
         url = article.get("url","")
 
-        arabic_title = translate(title)
+        ar_title = translate(title)
 
         sentiment, decision = analyze(title)
 
@@ -97,7 +115,29 @@ if st.button("تحليل الأخبار الآن"):
 
         results.append({
             "الأصل": asset,
-            "الخبر": arabic_title,
+            "الخبر": ar_title,
+            "التأثير": sentiment,
+            "التقييم": decision,
+            "الرابط": url
+        })
+
+    # أخبار الكريبتو
+    crypto_news = get_crypto_news()
+
+    for article in crypto_news:
+
+        title = article.get("title","")
+        url = article.get("url","")
+
+        ar_title = translate(title)
+
+        sentiment, decision = analyze(title)
+
+        asset = detect_asset(title)
+
+        results.append({
+            "الأصل": asset,
+            "الخبر": ar_title,
             "التأثير": sentiment,
             "التقييم": decision,
             "الرابط": url
