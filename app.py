@@ -10,7 +10,7 @@ COINGECKO_API = "https://api.coingecko.com/api/v3/coins/markets"
 PARAMS = {
     "vs_currency": "usd",
     "order": "market_cap_desc",
-    "per_page": 30,   # أعلى 30 عملة
+    "per_page": 30,
     "page": 1,
     "sparkline": False
 }
@@ -35,12 +35,11 @@ def fetch_historical_prices(coin_id, days=14):
         response = requests.get(url, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
-        prices = [p[1] for p in data['prices']]  # نجيب أسعار الإغلاق
+        prices = [p[1] for p in data['prices']]
         return pd.Series(prices)
     except:
         return pd.Series([])
 
-# ------------------------
 def calculate_ema(series, period=14):
     return series.ewm(span=period, adjust=False).mean().iloc[-1] if not series.empty else None
 
@@ -65,11 +64,10 @@ def calculate_score(row):
             score += 2
         elif row['rsi'] < 50:
             score += 1
-    if row['price'] > row['ema']:
+    if row['ema'] is not None and row['current_price'] > row['ema']:
         score += 2
-    if row['total_volume'] > row['total_volume']*0.8:  # حجم تداول عالي نسبي
+    if 'total_volume' in row and row['total_volume'] > 0:
         score += 1
-    # الحيتان مش موجودة في CoinGecko → Score إضافي يمكن مستقبلي
     return score
 
 # ------------------------
@@ -78,6 +76,7 @@ if st.button("تحديث البيانات"):
     if not df.empty:
         df['ema'] = None
         df['rsi'] = None
+
         for idx, row in df.iterrows():
             prices = fetch_historical_prices(row['id'], days=14)
             df.at[idx, 'ema'] = calculate_ema(prices)
