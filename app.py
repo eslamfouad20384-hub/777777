@@ -1,148 +1,69 @@
 import streamlit as st
 import requests
 import pandas as pd
-from textblob import TextBlob
-from deep_translator import GoogleTranslator
 
-st.set_page_config(layout="wide")
+# ------------------------
+# حط مفتاحك هنا
+API_KEY = "003f560175ff433399210b1564343f34"
+BASE_URL = "https://api.yourcryptodata.com"  # استبدل بالرابط الصح للـ API بتاعك
 
-st.title("🧠 محلل أخبار البورصة والكريبتو")
-st.write("يجمع الأخبار ويحلل تأثيرها على السوق بالعربي")
+# ------------------------
+st.set_page_config(page_title="تحليل العملات الرقمية بالعربي", layout="wide")
+st.title("أفضل 10 عملات يوميًا مع التحليل الفني")
 
-# مفتاح الأخبار
-NEWS_API = "003f560175ff433399210b1564343f34"
+# ------------------------
+@st.cache_data(ttl=300)
+def fetch_data():
+    headers = {"Authorization": f"Bearer {API_KEY}"}
+    response = requests.get(f"{BASE_URL}/all-coins", headers=headers)
+    data = response.json()
+    df = pd.DataFrame(data)
+    return df
 
-# =========================
-# جلب الأخبار العامة
-# =========================
+# ------------------------
+df = fetch_data()
 
-def get_general_news():
+# ------------------------
+# حساب Score مبسط (ممكن تزود مؤشرات)
+def calculate_score(row):
+    score = 0
+    # RSI
+    if row['rsi'] < 30:
+        score += 2
+    elif row['rsi'] < 50:
+        score += 1
+    # EMA اتجاه
+    if row['ema_trend'] == 'صاعد':
+        score += 2
+    # حجم التداول
+    if row['volume'] > row['avg_volume']:
+        score += 1
+    # تجمع الحيتان
+    if row['whale_activity'] == 'تجمع':
+        score += 2
+    return score
 
-    url = f"https://newsapi.org/v2/everything?q=stock market OR egypt economy OR bitcoin OR crypto&language=en&sortBy=publishedAt&pageSize=20&apiKey={NEWS_API}"
+df['Score'] = df.apply(calculate_score, axis=1)
+df = df.sort_values(by='Score', ascending=False).head(10)
 
-    r = requests.get(url)
-    data = r.json()
+# ------------------------
+# عرض النتائج بالعربي
+for i, row in df.iterrows():
+    st.subheader(f"{row['name']} ({row['symbol']})")
+    st.write(f"**السعر الحالي:** {row['price']}")
+    st.write(f"**الاتجاه العام:** {row['ema_trend']}")
+    st.write(f"**الدعم:** {row['support']} | **المقاومة:** {row['resistance']}")
+    st.write(f"**RSI:** {row['rsi']}")
+    st.write(f"**حجم التداول:** {row['volume']}")
+    st.write(f"**حركة الحيتان:** {row['whale_activity']}")
+    st.write(f"**Score للعملة:** {row['Score']}/10")
 
-    if "articles" in data:
-        return data["articles"]
-    return []
-
-# =========================
-# أخبار الكريبتو
-# =========================
-
-def get_crypto_news():
-
-    url = "https://cryptopanic.com/api/v1/posts/?auth_token=demo&public=true"
-
-    try:
-        r = requests.get(url)
-        data = r.json()
-
-        return data["results"][:20]
-
-    except:
-        return []
-
-# =========================
-# ترجمة
-# =========================
-
-def translate(text):
-
-    try:
-        return GoogleTranslator(source='auto', target='ar').translate(text)
-    except:
-        return text
-
-# =========================
-# تحليل المشاعر
-# =========================
-
-def analyze(text):
-
-    score = TextBlob(text).sentiment.polarity
-
-    if score > 0.2:
-        return "📈 إيجابي", "فرصة شراء"
-    elif score < -0.2:
-        return "📉 سلبي", "حذر"
+    # توصية بالعربي
+    if row['Score'] >= 7:
+        rec = "✅ مناسبة للشراء تدريجيًا"
+    elif row['Score'] >= 5:
+        rec = "⚠️ مناسب للشراء بحذر أو انتظار فرصة أفضل"
     else:
-        return "⚖️ محايد", "انتظار"
-
-# =========================
-# تحديد الأصل
-# =========================
-
-def detect_asset(text):
-
-    text = text.lower()
-
-    if "bitcoin" in text:
-        return "بيتكوين"
-    elif "ethereum" in text:
-        return "إيثريوم"
-    elif "solana" in text:
-        return "سولانا"
-    elif "crypto" in text:
-        return "سوق العملات الرقمية"
-    elif "egypt" in text:
-        return "البورصة المصرية"
-    else:
-        return "السوق العام"
-
-# =========================
-# تشغيل التحليل
-# =========================
-
-if st.button("تحليل الأخبار الآن"):
-
-    results = []
-
-    # الأخبار العامة
-    news = get_general_news()
-
-    for article in news:
-
-        title = article.get("title","")
-        url = article.get("url","")
-
-        ar_title = translate(title)
-
-        sentiment, decision = analyze(title)
-
-        asset = detect_asset(title)
-
-        results.append({
-            "الأصل": asset,
-            "الخبر": ar_title,
-            "التأثير": sentiment,
-            "التقييم": decision,
-            "الرابط": url
-        })
-
-    # أخبار الكريبتو
-    crypto_news = get_crypto_news()
-
-    for article in crypto_news:
-
-        title = article.get("title","")
-        url = article.get("url","")
-
-        ar_title = translate(title)
-
-        sentiment, decision = analyze(title)
-
-        asset = detect_asset(title)
-
-        results.append({
-            "الأصل": asset,
-            "الخبر": ar_title,
-            "التأثير": sentiment,
-            "التقييم": decision,
-            "الرابط": url
-        })
-
-    df = pd.DataFrame(results)
-
-    st.dataframe(df, use_container_width=True)
+        rec = "⏳ انتظر أو تابع التجمع قبل الشراء"
+    st.write(f"**التوصية:** {rec}")
+    st.markdown("---")
