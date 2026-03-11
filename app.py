@@ -3,16 +3,17 @@ import requests
 import pandas as pd
 import numpy as np
 
-st.set_page_config(page_title="أداة كريبتو حقيقية 🚀", layout="wide")
-st.title("🚀 كاشف العملات الرقمية مع مؤشرات حقيقية (RSI, EMA)")
+# ===========================================
+st.set_page_config(page_title="أداة كريبتو بالفعل 🧠", layout="wide")
+st.title("🚀 كاشف العملات بـ RSI و EMA من بيانات تاريخية حقيقية")
 
-# ===================== دوال المؤشرات =======================
+# ===========================================
 def compute_RSI(prices, period=14):
     delta = prices.diff()
-    gain = delta.clip(lower=0)
-    loss = -1*delta.clip(upper=0)
-    avg_gain = gain.rolling(period).mean()
-    avg_loss = loss.rolling(period).mean()
+    gain = np.where(delta>0, delta, 0)
+    loss = np.where(delta<0, -delta, 0)
+    avg_gain = pd.Series(gain).rolling(period).mean()
+    avg_loss = pd.Series(loss).rolling(period).mean()
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
     return rsi
@@ -20,88 +21,90 @@ def compute_RSI(prices, period=14):
 def compute_EMA(prices, period=20):
     return prices.ewm(span=period, adjust=False).mean()
 
-# ===================== CoinMarketCap API =======================
-api_key = "9027ddd4eadf4bff8281da22868c2094"  # مفتاحك هنا
+# ===========================================
+# Binance Historic Data (Daily)
+def get_binance_klines(symbol, interval="1d", limit=100):
+    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}USDT&interval={interval}&limit={limit}"
+    try:
+        data = requests.get(url, timeout=10).json()
+        df = pd.DataFrame(data, columns=[
+            "Open time","Open","High","Low","Close","Volume",
+            "Close time","Quote asset volume","Number of trades",
+            "Taker buy base asset volume","Taker buy quote asset volume","Ignore"
+        ])
+        df["Close"] = df["Close"].astype(float)
+        df["Volume"] = df["Volume"].astype(float)
+        return df
+    except:
+        return None
 
-def get_cmc_data(symbols):
-    url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
-    headers = {"X-CMC_PRO_API_KEY": api_key}
-    cmc_data = {}
-    for symbol in symbols:
-        try:
-            resp = requests.get(url, headers=headers, params={"symbol": symbol}, timeout=10).json()
-            quote = resp["data"][symbol]["quote"]["USD"]
-            cmc_data[symbol] = {
-                "price": quote["price"],
-                "market_cap": quote["market_cap"],
-                "volume_24h": quote["volume_24h"]
-            }
-        except:
-            continue
-    return cmc_data
+# ===========================================
+st.write("🔄 جلب البيانات التاريخية من Binance ...")
 
-# ===================== معالجة العملات =======================
-st.write("🔄 جلب البيانات الحقيقية من CoinMarketCap ...")
-
-# هنا حط أي رموز عملات تحب تتابعها
-symbols = ["BTC","ETH","BNB","ADA","SOL","DOT","LTC","XRP","AVAX","LINK"]  
+#  رموز العملات اللي عايز تتابعها
+symbols = ["BTC","ETH","BNB","ADA","SOL","LINK","AVAX","DOT","MATIC","XRP"]
 
 coins = []
-cmc = get_cmc_data(symbols)
 
 for symbol in symbols:
-    if symbol not in cmc:
-        continue  # لو مفيش بيانات من CMC، تجاهل العملة
-    data = cmc[symbol]
-    price = data["price"]
-    marketcap = data["market_cap"] if data["market_cap"] else 1
-    volume = data["volume_24h"] if data["volume_24h"] else 1
+    df_prices = get_binance_klines(symbol, limit=100)  # 100 يوم تاريخ
+    if df_prices is None or len(df_prices) < 50:
+        continue  # لو مش موجود على Binance أو ما فيش بيانات كافية
 
-    # لو مفيش بيانات تاريخية، نكرر السعر 50 مرة لحساب المؤشرات
-    prices_series = pd.Series([price]*50)
+    prices = df_prices["Close"]
+    volume_today = df_prices["Volume"].iloc[-1]
+    price_today = prices.iloc[-1]
 
-    rsi = compute_RSI(prices_series).iloc[-1]
-    ema20 = compute_EMA(prices_series, 20).iloc[-1]
-    ema50 = compute_EMA(prices_series, 50).iloc[-1]
+    # حساب المؤشرات
+    rsi_series = compute_RSI(prices, 14)
+    ema20_series = compute_EMA(prices, 20)
+    ema50_series = compute_EMA(prices, 50)
 
+    rsi = rsi_series.iloc[-1]
+    ema20 = ema20_series.iloc[-1]
+    ema50 = ema50_series.iloc[-1]
+
+    # مؤشر حجم التداول
+    avg_volume = df_prices["Volume"].rolling(14).mean().iloc[-2]  # متوسط 14 يوم قبل اليوم
+    volume_spike = volume_today > 3 * avg_volume
+
+    # تلميحات
     hint = []
-    if rsi < 30:
-        hint.append("شراء قوي (RSI منخفض)")
-    elif rsi > 70:
-        hint.append("بيع/تراجع محتمل (RSI مرتفع)")
-    else:
-        hint.append("RSI معتدل")
-
-    if ema20 > ema50:
-        hint.append("اتجاه صعودي (EMA20 > EMA50)")
-    else:
-        hint.append("اتجاه هبوطي (EMA20 < EMA50)")
+    if not np.isnan(rsi):
+        if rsi < 30:
+            hint.append("شراء قوي (RSI < 30)")
+        elif rsi > 70:
+            hint.append("بيع/تراجع محتمل (RSI > 70)")
+        else:
+            hint.append("RSI معتدل")
+    if not np.isnan(ema20) and not np.isnan(ema50):
+        if ema20 > ema50:
+            hint.append("اتجاه صعودي (EMA20 > EMA50)")
+        else:
+            hint.append("اتجاه هبوطي (EMA20 < EMA50)")
+    if volume_spike:
+        hint.append("حجم تداول ↑ 3 مرات")
 
     coins.append({
         "العملة": symbol,
-        "السعر الحالي": round(price,2),
-        "الماركت كاب": round(marketcap,2),
-        "حجم التداول": round(volume,2),
+        "السعر الحالي": round(price_today,2),
         "RSI": round(rsi,2),
         "EMA20": round(ema20,2),
         "EMA50": round(ema50,2),
+        "حجم التداول": round(volume_today,2),
         "تلميح": ", ".join(hint)
     })
 
 df = pd.DataFrame(coins)
 
-# ===================== Score وترتيب =======================
-def compute_score(row):
-    try:
-        return (row["حجم التداول"] / row["الماركت كاب"]) / abs(row["RSI"])
-    except:
-        return 0
+# ===========================================
+# Score
+df["score"] = (df["حجم التداول"] / df["EMA50"].replace(0,1)) * (100 - df["RSI"])
 
-df["score"] = df.apply(compute_score, axis=1)
 df_final = df.sort_values(by="score", ascending=False).head(10)
 
 if df_final.empty:
-    st.warning("لا توجد عملات تحقق الشروط حاليا")
+    st.warning("⚠️ مفيش عملات بتحقق الشروط أو مش موجودة على Binance")
 else:
-    st.subheader("🔥 أفضل 10 فرص بناءً على البيانات الحقيقية")
+    st.subheader("🔥 أفضل 10 فرص حقيقية بالفعل")
     st.dataframe(df_final, use_container_width=True)
