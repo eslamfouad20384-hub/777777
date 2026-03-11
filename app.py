@@ -2,7 +2,6 @@ import streamlit as st
 import requests
 import pandas as pd
 import numpy as np
-from datetime import datetime, timedelta
 
 st.set_page_config(page_title="أداة كريبتو حقيقية 🚀", layout="wide")
 st.title("🚀 كاشف العملات الرقمية مع مؤشرات حقيقية (RSI, EMA)")
@@ -21,24 +20,10 @@ def compute_RSI(prices, period=14):
 def compute_EMA(prices, period=20):
     return prices.ewm(span=period, adjust=False).mean()
 
-# ===================== Binance API =======================
-def get_binance_klines(symbol, interval="1d", limit=100):
-    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}USDT&interval={interval}&limit={limit}"
-    try:
-        data = requests.get(url, timeout=10).json()
-        df = pd.DataFrame(data, columns=[
-            "Open time","Open","High","Low","Close","Volume",
-            "Close time","Quote asset volume","Number of trades",
-            "Taker buy base asset volume","Taker buy quote asset volume","Ignore"
-        ])
-        df["Close"] = df["Close"].astype(float)
-        df["Volume"] = df["Volume"].astype(float)
-        return df
-    except:
-        return None
-
 # ===================== CoinMarketCap API =======================
-def get_cmc_data(api_key, symbols):
+api_key = "9027ddd4eadf4bff8281da22868c2094"  # مفتاحك هنا
+
+def get_cmc_data(symbols):
     url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
     headers = {"X-CMC_PRO_API_KEY": api_key}
     cmc_data = {}
@@ -56,31 +41,28 @@ def get_cmc_data(api_key, symbols):
     return cmc_data
 
 # ===================== معالجة العملات =======================
-st.write("🔄 جلب البيانات الحقيقية من Binance أو CoinMarketCap ...")
-symbols = ["BTC","ETH","BNB","ADA","SOL"]  # مثال، ممكن تعمل fetch لكل العملات
-api_key = "YOUR_CMC_API_KEY"  # ضع مفتاحك هنا
+st.write("🔄 جلب البيانات الحقيقية من CoinMarketCap ...")
+
+# هنا حط أي رموز عملات تحب تتابعها
+symbols = ["BTC","ETH","BNB","ADA","SOL","DOT","LTC","XRP","AVAX","LINK"]  
 
 coins = []
-for symbol in symbols:
-    df_prices = get_binance_klines(symbol)
-    if df_prices is not None and len(df_prices) >= 50:
-        prices = df_prices["Close"]
-        volume = df_prices["Volume"].iloc[-1]
-        price = prices.iloc[-1]
-        marketcap = np.nan  # ممكن تحط قيمة من CMC لو متاحة
-    else:
-        cmc = get_cmc_data(api_key, [symbol])
-        if symbol in cmc:
-            price = cmc[symbol]["price"]
-            marketcap = cmc[symbol]["market_cap"]
-            volume = cmc[symbol]["volume_24h"]
-            prices = pd.Series([price]*50)  # لو مفيش بيانات تاريخية، نكرر السعر 50 مرة
-        else:
-            continue  # لو مفيش بيانات من أي مصدر، تجاهل العملة
+cmc = get_cmc_data(symbols)
 
-    rsi = compute_RSI(prices).iloc[-1]
-    ema20 = compute_EMA(prices, 20).iloc[-1]
-    ema50 = compute_EMA(prices, 50).iloc[-1]
+for symbol in symbols:
+    if symbol not in cmc:
+        continue  # لو مفيش بيانات من CMC، تجاهل العملة
+    data = cmc[symbol]
+    price = data["price"]
+    marketcap = data["market_cap"] if data["market_cap"] else 1
+    volume = data["volume_24h"] if data["volume_24h"] else 1
+
+    # لو مفيش بيانات تاريخية، نكرر السعر 50 مرة لحساب المؤشرات
+    prices_series = pd.Series([price]*50)
+
+    rsi = compute_RSI(prices_series).iloc[-1]
+    ema20 = compute_EMA(prices_series, 20).iloc[-1]
+    ema50 = compute_EMA(prices_series, 50).iloc[-1]
 
     hint = []
     if rsi < 30:
@@ -97,9 +79,9 @@ for symbol in symbols:
 
     coins.append({
         "العملة": symbol,
-        "السعر الحالي": price,
-        "الماركت كاب": marketcap,
-        "حجم التداول": volume,
+        "السعر الحالي": round(price,2),
+        "الماركت كاب": round(marketcap,2),
+        "حجم التداول": round(volume,2),
         "RSI": round(rsi,2),
         "EMA20": round(ema20,2),
         "EMA50": round(ema50,2),
@@ -111,7 +93,7 @@ df = pd.DataFrame(coins)
 # ===================== Score وترتيب =======================
 def compute_score(row):
     try:
-        return (row["حجم التداول"] / (row["الماركت كاب"] if not np.isnan(row["الماركت كاب"]) else 1)) / abs(row["RSI"])
+        return (row["حجم التداول"] / row["الماركت كاب"]) / abs(row["RSI"])
     except:
         return 0
 
