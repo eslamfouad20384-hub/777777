@@ -1,105 +1,64 @@
 import streamlit as st
 import requests
 import pandas as pd
-import numpy as np
 
-st.set_page_config(page_title="تحليل العملات الرقمية بالعربي", layout="wide")
-st.title("أفضل 10 عملات مع التحليل الفني الحقيقي (CoinGecko)")
+# إعداد الصفحة
+st.set_page_config(page_title="كاشف العملات قبل الانفجار", layout="wide")
 
-COINGECKO_API = "https://api.coingecko.com/api/v3/coins/markets"
-PARAMS = {
-    "vs_currency": "usd",
-    "order": "market_cap_desc",
-    "per_page": 30,
-    "page": 1,
-    "sparkline": False
-}
+st.title("🚀 كاشف العملات المضغوطة قبل الانفجار")
 
-# ------------------------
-def fetch_data():
-    try:
-        response = requests.get(COINGECKO_API, params=PARAMS, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        df = pd.DataFrame(data)
-        return df
-    except Exception as e:
-        st.error(f"حدث خطأ في الاتصال بـ CoinGecko: {e}")
-        return pd.DataFrame()
+st.write("الأداة دي بتفحص أفضل 250 عملة في السوق وتطلع العملات اللي:")
+st.write("1️⃣ حجم التداول عالي")
+st.write("2️⃣ السعر لسه ثابت")
+st.write("3️⃣ الماركت كاب أقل من 500 مليون")
 
-# ------------------------
-def fetch_historical_prices(coin_id, days=14):
-    url = f"https://api.coingecko.com/api/v3/coins/{coin_id}/market_chart"
-    params = {"vs_currency": "usd", "days": days}
-    try:
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        prices = [p[1] for p in data['prices']]
-        return pd.Series(prices)
-    except:
-        return pd.Series([])
+# زر تحديث البيانات
+if st.button("🔄 تحديث البيانات"):
 
-def calculate_ema(series, period=14):
-    return series.ewm(span=period, adjust=False).mean().iloc[-1] if not series.empty else None
+    url = "https://api.coingecko.com/api/v3/coins/markets"
 
-def calculate_rsi(series, period=14):
-    if series.empty:
-        return None
-    delta = series.diff()
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-    avg_gain = gain.rolling(period).mean().iloc[-1]
-    avg_loss = loss.rolling(period).mean().iloc[-1]
-    if avg_loss == 0:
-        return 100
-    rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
+    params = {
+        "vs_currency": "usd",
+        "order": "volume_desc",
+        "per_page": 250,
+        "page": 1,
+        "sparkline": False,
+        "price_change_percentage": "24h"
+    }
 
-# ------------------------
-def calculate_score(row):
-    score = 0
-    if row['rsi'] is not None:
-        if row['rsi'] < 30:
-            score += 2
-        elif row['rsi'] < 50:
-            score += 1
-    if row['ema'] is not None and row['current_price'] > row['ema']:
-        score += 2
-    if 'total_volume' in row and row['total_volume'] > 0:
-        score += 1
-    return score
+    data = requests.get(url, params=params).json()
 
-# ------------------------
-if st.button("تحديث البيانات"):
-    df = fetch_data()
-    if not df.empty:
-        df['ema'] = None
-        df['rsi'] = None
+    coins = []
 
-        for idx, row in df.iterrows():
-            prices = fetch_historical_prices(row['id'], days=14)
-            df.at[idx, 'ema'] = calculate_ema(prices)
-            df.at[idx, 'rsi'] = calculate_rsi(prices)
+    for coin in data:
 
-        df['Score'] = df.apply(calculate_score, axis=1)
-        df = df.sort_values(by='Score', ascending=False).head(10)
+        name = coin["name"]
+        symbol = coin["symbol"].upper()
+        price = coin["current_price"]
+        volume = coin["total_volume"]
+        marketcap = coin["market_cap"]
+        change = coin["price_change_percentage_24h"]
 
-        for i, row in df.iterrows():
-            st.subheader(f"{row['name']} ({row['symbol'].upper()})")
-            st.write(f"**السعر الحالي:** ${row['current_price']}")
-            st.write(f"**EMA آخر 14 يوم:** {row['ema']:.2f}" if row['ema'] else "EMA غير متوفر")
-            st.write(f"**RSI آخر 14 يوم:** {row['rsi']:.2f}" if row['rsi'] else "RSI غير متوفر")
-            st.write(f"**حجم التداول:** {row['total_volume']}")
-            st.write(f"**Score للعملة:** {row['Score']}/10")
+        # الشروط
+        if marketcap is not None and volume is not None and change is not None:
 
-            if row['Score'] >= 7:
-                rec = "✅ مناسبة للشراء تدريجيًا"
-            elif row['Score'] >= 5:
-                rec = "⚠️ مناسب للشراء بحذر أو انتظار فرصة أفضل"
-            else:
-                rec = "⏳ انتظر أو تابع التجمع قبل الشراء"
-            st.write(f"**التوصية:** {rec}")
-            st.markdown("---")
+            if marketcap < 500000000 and volume > (marketcap * 0.03) and abs(change) < 5:
+
+                coins.append({
+                    "العملة": name,
+                    "الرمز": symbol,
+                    "السعر الحالي": price,
+                    "الماركت كاب": marketcap,
+                    "حجم التداول": volume,
+                    "تغير السعر 24h %": round(change,2)
+                })
+
+    df = pd.DataFrame(coins)
+
+    if len(df) > 0:
+        st.success(f"تم العثور على {len(df)} عملة مرشحة")
+        st.dataframe(df, use_container_width=True)
     else:
-        st.warning("لا توجد بيانات للعرض.")
+        st.warning("لا يوجد عملات تحقق الشروط حالياً")
+
+st.write("📊 يتم جلب البيانات من CoinGecko مباشرة")
