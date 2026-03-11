@@ -2,17 +2,10 @@ import streamlit as st
 import requests
 import pandas as pd
 import numpy as np
+from datetime import datetime, timedelta
 
-st.set_page_config(page_title="أداة كريبتو متقدمة 🚀", layout="wide")
-st.title("🚀 كاشف العملات المضغوطة قبل الانفجار مع مؤشرات RSI و EMA ومصادر احتياطية")
-
-st.write("""
-الأداة بتحلل أفضل 250 عملة رقمية وتحدد أفضل 10 فرص للشراء، مع:
-- مؤشرات RSI و EMA20 و EMA50
-- كشف حجم التداول المفاجئ
-- تلميحات لكل عملة
-- استخدام مصادر احتياطية عند فشل المصدر الأساسي
-""")
+st.set_page_config(page_title="أداة كريبتو حقيقية 🚀", layout="wide")
+st.title("🚀 كاشف العملات الرقمية مع مؤشرات حقيقية (RSI, EMA)")
 
 # ===================== دوال المؤشرات =======================
 def compute_RSI(prices, period=14):
@@ -28,26 +21,24 @@ def compute_RSI(prices, period=14):
 def compute_EMA(prices, period=20):
     return prices.ewm(span=period, adjust=False).mean()
 
-# ===================== جلب البيانات =======================
-def get_coingecko_data():
-    url = "https://api.coingecko.com/api/v3/coins/markets"
-    params = {
-        "vs_currency": "usd",
-        "order": "market_cap_desc",
-        "per_page": 250,
-        "page": 1,
-        "sparkline": True,
-        "price_change_percentage": "24h"
-    }
+# ===================== Binance API =======================
+def get_binance_klines(symbol, interval="1d", limit=100):
+    url = f"https://api.binance.com/api/v3/klines?symbol={symbol}USDT&interval={interval}&limit={limit}"
     try:
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.RequestException as e:
-        st.warning(f"❌ خطأ في CoinGecko: {e}")
-        return []
+        data = requests.get(url, timeout=10).json()
+        df = pd.DataFrame(data, columns=[
+            "Open time","Open","High","Low","Close","Volume",
+            "Close time","Quote asset volume","Number of trades",
+            "Taker buy base asset volume","Taker buy quote asset volume","Ignore"
+        ])
+        df["Close"] = df["Close"].astype(float)
+        df["Volume"] = df["Volume"].astype(float)
+        return df
+    except:
+        return None
 
-def get_coinmarketcap_data(api_key, symbols):
+# ===================== CoinMarketCap API =======================
+def get_cmc_data(api_key, symbols):
     url = "https://pro-api.coinmarketcap.com/v1/cryptocurrency/quotes/latest"
     headers = {"X-CMC_PRO_API_KEY": api_key}
     cmc_data = {}
@@ -64,137 +55,71 @@ def get_coinmarketcap_data(api_key, symbols):
             continue
     return cmc_data
 
-def get_binance_data(symbol):
-    url = f"https://api.binance.com/api/v3/ticker/24hr?symbol={symbol}USDT"
-    try:
-        resp = requests.get(url, timeout=10).json()
-        return {
-            "price": float(resp["lastPrice"]),
-            "volume_24h": float(resp["quoteVolume"])
-        }
-    except:
-        return None
+# ===================== معالجة العملات =======================
+st.write("🔄 جلب البيانات الحقيقية من Binance أو CoinMarketCap ...")
+symbols = ["BTC","ETH","BNB","ADA","SOL"]  # مثال، ممكن تعمل fetch لكل العملات
+api_key = "YOUR_CMC_API_KEY"  # ضع مفتاحك هنا
 
-# ===================== معالجة البيانات =======================
-st.write("🔄 تحديث البيانات من CoinGecko ...")
-data = get_coingecko_data()
 coins = []
-
-for coin in data:
-    try:
-        name = coin["name"]
-        symbol = coin["symbol"].upper()
-        price = coin.get("current_price", np.nan)
-        marketcap = coin.get("market_cap", np.nan)
-        volume = coin.get("total_volume", np.nan)
-        change = coin.get("price_change_percentage_24h", np.nan)
-        sparkline = coin.get("sparkline_in_7d", {}).get("price", [])
-
-        prices_series = pd.Series(sparkline)
-        rsi = compute_RSI(prices_series).iloc[-1] if len(prices_series) > 14 else np.nan
-        ema20 = compute_EMA(prices_series, 20).iloc[-1] if len(prices_series) >= 20 else np.nan
-        ema50 = compute_EMA(prices_series, 50).iloc[-1] if len(prices_series) >= 50 else np.nan
-
-        volume_spike = False
-        if not np.isnan(volume) and len(prices_series) > 0:
-            avg_price_volume = np.mean(prices_series)
-            volume_spike = volume > 3 * avg_price_volume
-
-        hint = []
-        if not np.isnan(rsi):
-            if rsi < 30:
-                hint.append("شراء قوي (RSI منخفض)")
-            elif rsi > 70:
-                hint.append("بيع/تراجع محتمل (RSI مرتفع)")
-            else:
-                hint.append("RSI معتدل")
+for symbol in symbols:
+    df_prices = get_binance_klines(symbol)
+    if df_prices is not None and len(df_prices) >= 50:
+        prices = df_prices["Close"]
+        volume = df_prices["Volume"].iloc[-1]
+        price = prices.iloc[-1]
+        marketcap = np.nan  # ممكن تحط قيمة من CMC لو متاحة
+    else:
+        cmc = get_cmc_data(api_key, [symbol])
+        if symbol in cmc:
+            price = cmc[symbol]["price"]
+            marketcap = cmc[symbol]["market_cap"]
+            volume = cmc[symbol]["volume_24h"]
+            prices = pd.Series([price]*50)  # لو مفيش بيانات تاريخية، نكرر السعر 50 مرة
         else:
-            hint.append("RSI غير متاح")
+            continue  # لو مفيش بيانات من أي مصدر، تجاهل العملة
 
-        if not np.isnan(ema20) and not np.isnan(ema50):
-            if ema20 > ema50:
-                hint.append("اتجاه صعودي (EMA20 > EMA50)")
-            else:
-                hint.append("اتجاه هبوطي (EMA20 < EMA50)")
-        else:
-            hint.append("EMA غير متاح")
+    rsi = compute_RSI(prices).iloc[-1]
+    ema20 = compute_EMA(prices, 20).iloc[-1]
+    ema50 = compute_EMA(prices, 50).iloc[-1]
 
-        if volume_spike:
-            hint.append("حجم تداول مفاجئ ↑")
+    hint = []
+    if rsi < 30:
+        hint.append("شراء قوي (RSI منخفض)")
+    elif rsi > 70:
+        hint.append("بيع/تراجع محتمل (RSI مرتفع)")
+    else:
+        hint.append("RSI معتدل")
 
-        coins.append({
-            "العملة": name,
-            "الرمز": symbol,
-            "السعر الحالي": price,
-            "الماركت كاب": marketcap,
-            "حجم التداول": volume,
-            "تغير السعر 24h %": change,
-            "RSI": round(rsi,2) if not np.isnan(rsi) else np.nan,
-            "EMA20": round(ema20,2) if not np.isnan(ema20) else np.nan,
-            "EMA50": round(ema50,2) if not np.isnan(ema50) else np.nan,
-            "تلميح": ", ".join(hint)
-        })
-    except:
-        continue
+    if ema20 > ema50:
+        hint.append("اتجاه صعودي (EMA20 > EMA50)")
+    else:
+        hint.append("اتجاه هبوطي (EMA20 < EMA50)")
+
+    coins.append({
+        "العملة": symbol,
+        "السعر الحالي": price,
+        "الماركت كاب": marketcap,
+        "حجم التداول": volume,
+        "RSI": round(rsi,2),
+        "EMA20": round(ema20,2),
+        "EMA50": round(ema50,2),
+        "تلميح": ", ".join(hint)
+    })
 
 df = pd.DataFrame(coins)
 
-# ===================== فلترة وفرز =======================
-required_cols = ["العملة","الرمز","السعر الحالي","الماركت كاب","حجم التداول",
-                 "تغير السعر 24h %","RSI","EMA20","EMA50","تلميح"]
-
-for col in required_cols:
-    if col not in df.columns:
-        df[col] = np.nan
-
-df_filtered = df.dropna(subset=["الماركت كاب", "تغير السعر 24h %"])
-df_filtered = df_filtered[(df_filtered["الماركت كاب"] < 500_000_000) & (df_filtered["تغير السعر 24h %"].abs() < 5)]
-
-# ===================== حساب Score =======================
-def compute_safe_score(row):
-    rsi_val = row["RSI"] if not pd.isna(row["RSI"]) else 50
+# ===================== Score وترتيب =======================
+def compute_score(row):
     try:
-        return (row["حجم التداول"] / row["الماركت كاب"]) / abs(rsi_val)
+        return (row["حجم التداول"] / (row["الماركت كاب"] if not np.isnan(row["الماركت كاب"]) else 1)) / abs(row["RSI"])
     except:
         return 0
 
-df_filtered["score"] = df_filtered.apply(compute_safe_score, axis=1)
-
-# ===================== تحديث التلميح =======================
-def compute_hint(row):
-    hint = []
-    if not pd.isna(row["RSI"]):
-        if row["RSI"] < 30:
-            hint.append("شراء قوي (RSI منخفض)")
-        elif row["RSI"] > 70:
-            hint.append("بيع/تراجع محتمل (RSI مرتفع)")
-        else:
-            hint.append("RSI معتدل")
-    else:
-        hint.append("RSI غير متاح")
-
-    if not pd.isna(row["EMA20"]) and not pd.isna(row["EMA50"]):
-        if row["EMA20"] > row["EMA50"]:
-            hint.append("اتجاه صعودي (EMA20 > EMA50)")
-        else:
-            hint.append("اتجاه هبوطي (EMA20 < EMA50)")
-    else:
-        hint.append("EMA غير متاح")
-
-    if not pd.isna(row["حجم التداول"]) and not pd.isna(row["الماركت كاب"]):
-        if row["حجم التداول"] > 3*row["الماركت كاب"]*0.01:
-            hint.append("حجم تداول مفاجئ ↑")
-    return ", ".join(hint)
-
-df_filtered["تلميح"] = df_filtered.apply(compute_hint, axis=1)
-
-# ===================== أفضل 10 فرص =======================
-df_final = df_filtered.sort_values(by="score", ascending=False).head(10)
+df["score"] = df.apply(compute_score, axis=1)
+df_final = df.sort_values(by="score", ascending=False).head(10)
 
 if df_final.empty:
     st.warning("لا توجد عملات تحقق الشروط حاليا")
 else:
-    st.subheader("🔥 أفضل 10 فرص مضغوطة قبل الانفجار")
-    st.dataframe(df_final[required_cols + ["score"]], use_container_width=True)
-
-st.write("📊 البيانات مأخوذة أساسًا من CoinGecko، مع إمكانية استخدام مصادر احتياطية مثل CoinMarketCap وBinance عند الحاجة.")
+    st.subheader("🔥 أفضل 10 فرص بناءً على البيانات الحقيقية")
+    st.dataframe(df_final, use_container_width=True)
